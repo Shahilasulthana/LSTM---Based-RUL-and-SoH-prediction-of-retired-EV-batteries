@@ -1,0 +1,20 @@
+
+# Python
+__pycache__/
+*.pyc
+
+# Dataset (Raw)
+archive (9)/
+
+# Environment
+.venv/
+env/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Large binaries (Optional, but good practice if they get huge. Keeping model/scaler for now as they are needed for the app)
+# *.keras
+# *.pkl
