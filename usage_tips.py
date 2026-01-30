@@ -1,6 +1,9 @@
 import pandas as pd
 import numpy as np
 import joblib
+import matplotlib.pyplot as plt
+import seaborn as sns
+import shap
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, r2_score
@@ -163,10 +166,11 @@ def main():
         # We assume the saved LightGBM is the one we want to use for the "Ultimate" experience
         try:
             loaded_model = joblib.load('battery_credit_model_lightGBM.pkl')
-            pred_score = loaded_model.predict([sample_input])[0]
+            model_to_use = loaded_model
         except:
-            pred_score = best_overall_model.predict([sample_input])[0]
+            model_to_use = best_overall_model
 
+        pred_score = model_to_use.predict([sample_input])[0]
         guidance = get_usage_guidance(pred_score)
         
         print(f"\n{guidance['color']} Battery (True: {true_score:.1f}, Pred: {pred_score:.1f}) | {guidance['band']}")
@@ -174,6 +178,84 @@ def main():
         print(f"   Recommended practices:")
         for practice in guidance['practices']:
             print(f"     - {practice}")
+
+    # ---------------------------------------------------------
+    # 6. EXPLAINABILITY SECTION (SHAP)
+    # ---------------------------------------------------------
+    print("\n" + "="*50)
+    print("🧠 EXPLAINABILITY ANALYSIS (Why did the model predict this?)")
+    print("="*50)
+    
+    # Use the best model (Likely LightGBM)
+    model_for_shap = best_overall_model
+    
+    # 1. Global Feature Importance (Avg impact)
+    try:
+        if hasattr(model_for_shap, 'feature_importances_'):
+            print("\n1. Generating Global Feature Importance Plot...")
+            feature_importances = pd.Series(model_for_shap.feature_importances_, index=X.columns).sort_values(ascending=False)
+            plt.figure(figsize=(10, 6))
+            sns.barplot(x=feature_importances, y=feature_importances.index, hue=feature_importances.index, palette='viridis', legend=False)
+            plt.title("Global Feature Importance (What matters most?)")
+            plt.xlabel("Importance Score")
+            plt.tight_layout()
+            plt.show() # In a script this might just pop up a window or do nothing if headless.
+            # We also print it for CLI visibility
+            print("\nTop Features driving the Credit Score:")
+            print(feature_importances.head(5))
+    except Exception as e:
+        print(f"Skipping feature importance plot: {e}")
+
+    # 2. Local Explanation (Waterfall Plot for a single sample)
+    print("\n2. analyzing a specific battery case...")
+    try:
+        # Create a sample that matches OUR features
+        # Features: ['V_avg', 'V_min', 'V_max', 'I_avg', 'T_avg', 'T_min', 'T_max', 'cycle']
+        sample_data = pd.DataFrame([{
+            'V_avg': 3.4, 'V_min': 2.5, 'V_max': 4.1, 
+            'I_avg': -1.5, 
+            'T_avg': 34.0, 'T_min': 25.0, 'T_max': 45.0, # Slightly hot
+            'cycle': 500  # Mid-life
+        }])
+        
+        # Predict
+        score = model_for_shap.predict(sample_data)[0]
+        print(f"\n--- Prediction Result for Sample Case ---")
+        print(f"Input: Mid-life battery (500 cycles, Max Temp 45°C)")
+        print(f"Predicted Credit Score: {score:.2f} / 100")
+        
+        guidance = get_usage_guidance(score)
+        print(f"Band: {guidance['band']}")
+        print(f"Recommendation: {guidance['message']}")
+
+        # SHAP Values
+        explainer = shap.TreeExplainer(model_for_shap)
+        shap_values = explainer(sample_data)
+        
+        # Textual Explanation
+        base_value = shap_values.base_values[0]
+        print(f"\n--- Textual Explanation of the Score ---")
+        print(f"Base Score (Average Battery): {base_value:.2f}")
+        print(f"Final Score: {score:.2f}")
+        print("Why?")
+        
+        # Extract impacts
+        features_names = sample_data.columns
+        impacts = shap_values.values[0]
+        feature_impacts = sorted(zip(features_names, impacts), key=lambda x: abs(x[1]), reverse=True)
+        
+        for feat, impact in feature_impacts:
+            if abs(impact) < 0.05: continue # Ignore negligible
+            direction = "INCREASED" if impact > 0 else "DECREASED"
+            val = sample_data[feat].values[0]
+            print(f"  - {feat} (Value: {val}) {direction} the score by {abs(impact):.2f} points")
+            
+        print("\n(Note: High Cycle count and Temperature typically decrease the score)")
+
+    except Exception as e:
+        print(f"Explainability error: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()

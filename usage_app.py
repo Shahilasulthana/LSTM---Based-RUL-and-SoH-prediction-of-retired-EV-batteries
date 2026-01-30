@@ -6,6 +6,14 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model
 import os
 import plotly.graph_objects as go
+import shap
+import warnings
+
+# Use plotting backend compatible with Streamlit if needed, though we use Plotly
+import matplotlib.pyplot as plt
+
+# Suppress warnings
+warnings.filterwarnings('ignore')
 
 # ==========================================
 # 1. Page Configuration & Custom CSS
@@ -54,65 +62,93 @@ st.markdown("""
         .tip-header { font-size: 22px; font-weight: bold; margin-bottom: 10px; }
         .tip-msg { font-size: 16px; font-style: italic; margin-bottom: 15px; color: #555; }
         .tip-list { font-size: 16px; color: #333; line-height: 1.6; }
+        
+        /* Explainability Styling */
+        .impact-positive { color: #2E7D32; font-weight: bold; }
+        .impact-negative { color: #C62828; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. Helper Logic (Usage Guidance)
+# 2. Battery Advisor Logic Class
 # ==========================================
-def get_usage_guidance(credit_score):
-    """Returns guidance dict based on credit score."""
-    if credit_score >= 80:
-        return {
-            "band": "Very Healthy",
-            "color": "#4CAF50",  # Green
-            "bg_color": "#E8F5E9",
-            "icon": "🟢",
-            "message": "This battery shows low degradation and stable behavior.",
-            "practices": [
-                "Prefer slow charge/discharge cycles.",
-                "Avoid continuous full-depth discharges.",
-                "Maintain moderate operating temperatures."
-            ]
-        }
-    elif credit_score >= 65:
-        return {
-            "band": "Healthy",
-            "color": "#FFC107",  # Amber
-            "bg_color": "#FFF8E1",
-            "icon": "🟡",
-            "message": "This battery shows moderate aging; operate under controlled conditions.",
-            "practices": [
-                "Limit depth of discharge to ~60–70%.",
-                "Avoid frequent high-current operations.",
-                "Ensure adequate ventilation during use."
-            ]
-        }
-    elif credit_score >= 45:
-        return {
-            "band": "Degraded",
-            "color": "#FF9800",  # Orange
-            "bg_color": "#FFF3E0",
-            "icon": "🔵",
-            "message": "This battery shows noticeable degradation and reduced efficiency.",
-            "practices": [
-                "Use strictly for low-power or intermittent loads.",
-                "Avoid fast charging entirely.",
-                "Keep discharge durations short."
-            ]
-        }
-    else:
-        return {
-            "band": "Critical",
-            "color": "#F44336",  # Red
-            "bg_color": "#FFEBEE",
-            "icon": "🔴",
-            "message": "This battery exhibits severe degradation and elevated risk.",
-            "practices": [
-                "Continued reuse is NOT recommended and may vary likely fail.",
-                "Professional evaluation or recycling is advised."
-            ]
-        }
+class BatteryAdvisor:
+    """
+    All-in-One Battery Advisor Engine.
+    Contains: ML Model, Rule Logic, and SHAP Explainer.
+    """
+    def __init__(self, model_path='battery_credit_model_lightGBM.pkl'):
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model file {model_path} not found.")
+        
+        self.model = joblib.load(model_path)
+        self.explainer = None 
+        
+    def _init_explainer(self):
+        if self.explainer is None:
+            self.explainer = shap.TreeExplainer(self.model)
+
+    def get_usage_guidance(self, credit_score):
+        if credit_score >= 80:
+            return {
+                "band": "Very Healthy",
+                "color": "#4CAF50", "bg_color": "#E8F5E9", "icon": "🟢",
+                "message": "This battery shows low degradation and stable behavior.",
+                "practices": ["Prefer slow charge/discharge.", "Avoid continuous full-depth cycles.", "Maintain moderate temps."]
+            }
+        elif credit_score >= 65:
+            return {
+                "band": "Healthy",
+                "color": "#FFC107", "bg_color": "#FFF8E1", "icon": "🟡",
+                "message": "Moderate aging; operate under controlled conditions.",
+                "practices": ["Limit DoD to ~60–70%.", "Avoid high-current ops.", "Ensure ventilation."]
+            }
+        elif credit_score >= 45:
+            return {
+                "band": "Degraded",
+                "color": "#FF9800", "bg_color": "#FFF3E0", "icon": "🔵",
+                "message": "Noticeable degradation; reduced efficiency.",
+                "practices": ["Low-power loads only.", "No fast charging.", "Short discharge durations."]
+            }
+        else:
+            return {
+                "band": "Critical",
+                "color": "#F44336", "bg_color": "#FFEBEE", "icon": "🔴",
+                "message": "Severe degradation; elevated risk.",
+                "practices": ["Reuse NOT recommended.", "Recycling advised."]
+            }
+
+    def predict(self, input_features):
+        if isinstance(input_features, dict):
+            input_features = pd.DataFrame([input_features])
+        
+        raw_score = self.model.predict(input_features)[0]
+        credit_score = max(0, min(100, raw_score))
+        guidance = self.get_usage_guidance(credit_score)
+        
+        return {"score": credit_score, "guidance": guidance}
+
+    def explain(self, input_features):
+        self._init_explainer()
+        if isinstance(input_features, dict):
+            input_features = pd.DataFrame([input_features])
+            
+        shap_values = self.explainer(input_features)
+        
+        features = input_features.columns
+        impacts = shap_values.values[0]
+        
+        explanations = []
+        for feat, impact in sorted(zip(features, impacts), key=lambda x: abs(x[1]), reverse=True):
+            if abs(impact) < 0.01: continue 
+            direction = "INCREASED" if impact > 0 else "DECREASED"
+            val = input_features[feat].values[0]
+            explanations.append({
+                "feature": feat, "value": val, "impact": impact,
+                "direction": direction,
+                "text": f"{feat} ({val:.2f}) {direction} score by {abs(impact):.2f}"
+            })
+        return explanations
 
 # ==========================================
 # 3. Load Resources
@@ -123,27 +159,25 @@ def load_resources():
         # Load Scaler
         scaler = joblib.load('scaler.pkl')
         
-        # Load LSTM (RUL/SoH)
+        # Load LSTM
         lstm_model = load_model('battery_lstm_model.keras')
         
-        # Load LightGBM (Credit Score)
-        # Note: In a real deployment, ensure this file exists. 
-        # The user just created it in the previous turn.
-        credit_model = joblib.load('battery_credit_model_lightGBM.pkl')
+        # Initialize Advisor (Loads LightGBM internally)
+        advisor = BatteryAdvisor('battery_credit_model_lightGBM.pkl')
         
-        return scaler, lstm_model, credit_model
+        return scaler, lstm_model, advisor
     except Exception as e:
-        st.error(f"Error loading models: {e}")
+        st.error(f"Error loading resources: {e}")
         return None, None, None
 
-scaler, lstm_model, credit_model = load_resources()
+scaler, lstm_model, advisor = load_resources()
 
 # ==========================================
 # 4. Sidebar Inputs
 # ==========================================
 with st.sidebar:
     st.title("🔋 Battery Inputs")
-    st.markdown("Confugure the latest cycle parameters:")
+    st.markdown("Configure parameters:")
     
     # Default inputs based on a standard test case
     V_avg = st.number_input("Avg Voltage (V)", 0.0, 5.0, 3.5298, format="%.4f")
@@ -153,126 +187,121 @@ with st.sidebar:
     T_avg = st.number_input("Avg Temp (°C)", 0.0, 100.0, 32.5723, format="%.4f")
     T_min = st.number_input("Min Temp (°C)", 0.0, 100.0, 24.3260, format="%.4f")
     T_max = st.number_input("Max Temp (°C)", 0.0, 100.0, 38.9822, format="%.4f")
-    
-    # We also need 'cycle' for the Credit Score model
     cycle = st.number_input("Cycle Count", 0, 2000, 100)
 
-    # Prepare DataFrame
     input_dict = {
         'V_avg': [V_avg], 'V_min': [V_min], 'V_max': [V_max],
         'I_avg': [I_avg],
         'T_avg': [T_avg], 'T_min': [T_min], 'T_max': [T_max],
-        'cycle': [cycle] # Used for Credit Score
+        'cycle': [cycle]
     }
     input_df = pd.DataFrame(input_dict)
     
     st.write("---")
-    analyze = st.button("🔍 Generate Report")
+    analyze = st.button("🔍 Generate Report", type="primary")
 
 # ==========================================
 # 5. Main Dashboard Logic
 # ==========================================
 st.title("💡 Smart Battery Usage Advisor")
 st.markdown("### Diagnosis & Life-Extension Recommendations")
-st.markdown("This system analyzes battery telemetry to generate a **Health Credit Score** and actionable **Usage Guidelines**.")
 
-if analyze and scaler and lstm_model and credit_model:
-    with st.spinner("Processing telemetry data..."):
+if analyze and advisor:
+    with st.spinner("Analyzing telemetry & generating explanation..."):
         # --- A. Predict RUL & SoH (LSTM) ---
-        # LSTM Features: ['V_avg', 'V_min', 'V_max', 'I_avg', 'T_avg', 'T_min', 'T_max']
         lstm_features = ['V_avg', 'V_min', 'V_max', 'I_avg', 'T_avg', 'T_min', 'T_max']
-        
-        # Scale
         input_norm = scaler.transform(input_df[lstm_features])
-        
-        # Reshape for LSTM: (1, 20, 7) - Repeat single step 20 times for steady-state shim
-        seq_len = 20
-        input_seq = np.repeat(input_norm, seq_len, axis=0).reshape(1, seq_len, len(lstm_features))
-        
+        input_seq = np.repeat(input_norm, 20, axis=0).reshape(1, 20, 7)
         lstm_preds = lstm_model.predict(input_seq, verbose=0)
         pred_rul = float(lstm_preds[0][0][0])
-        pred_soh = float(lstm_preds[1][0][0]) * 100  # Convert to %
-        
-        # --- B. Predict Credit Score (LightGBM) ---
-        # LightGBM Features: ['V_avg', 'V_min', 'V_max', 'I_avg', 'T_avg', 'T_min', 'T_max', 'cycle']
-        credit_score = float(credit_model.predict(input_df)[0])
-        
-        # Clamp Score
-        credit_score = max(0, min(100, credit_score))
-        
-        # Get Guidance
-        guidance = get_usage_guidance(credit_score)
+        pred_soh = float(lstm_preds[1][0][0]) * 100
 
-    # --- C. Display Results ---
-    
-    # 1. Scorecard Row
+        # --- B. Advisor Prediction ---
+        result = advisor.predict(input_df)
+        score = result['score']
+        guidance = result['guidance']
+        
+        # --- C. Explainability ---
+        explanations = advisor.explain(input_df)
+
+    # --- ROW 1: Scorecards ---
     col1, col2, col3 = st.columns(3)
-    
     with col1:
         st.markdown(f"""
         <div class="metric-container">
             <h4 style="color:#777;">Health Credit Score</h4>
-            <h1 style="color:{guidance['color']}; font-size: 56px;">{credit_score:.1f}</h1>
+            <h1 style="color:{guidance['color']}; font-size: 56px;">{score:.1f}</h1>
             <p>out of 100</p>
         </div>
         """, unsafe_allow_html=True)
-        
     with col2:
         st.markdown(f"""
         <div class="metric-container">
             <h4 style="color:#777;">State of Health (SoH)</h4>
             <h1 style="color:#333; font-size: 56px;">{pred_soh:.1f}%</h1>
-            <p>Estimated Capacity</p>
         </div>
         """, unsafe_allow_html=True)
-
     with col3:
         st.markdown(f"""
         <div class="metric-container">
-            <h4 style="color:#777;">Remaining Useful Life</h4>
+            <h4 style="color:#777;">RUL Estimate</h4>
             <h1 style="color:#333; font-size: 56px;">{pred_rul:.0f}</h1>
-            <p>Cycles Remaining</p>
+            <p>Cycles</p>
         </div>
         """, unsafe_allow_html=True)
 
     st.write("---")
 
-    # 2. Main Guidance Section
+    # --- ROW 2: Recommendations ---
     st.subheader("📋 Usage Recommendations")
-    
     guidance_html = f"""
     <div class="tip-card" style="border-left-color: {guidance['color']}; background-color: {guidance['bg_color']};">
         <div class="tip-header" style="color: {guidance['color']};">
             {guidance['icon']} Status: {guidance['band']}
         </div>
-        <div class="tip-msg">
-            "{guidance['message']}"
-        </div>
-        <hr style="border-top: 1px dashed {guidance['color']}; opacity: 0.5;">
+        <div class="tip-msg">"{guidance['message']}"</div>
         <div class="tip-list">
-            <b>Recommended Practices:</b>
-            <ul>
+            <b>Recommended Practices:</b><ul>
     """
     for tip in guidance['practices']:
         guidance_html += f"<li>{tip}</li>"
-    
-    guidance_html += """
-            </ul>
-        </div>
-    </div>
-    """
+    guidance_html += "</ul></div></div>"
     st.markdown(guidance_html, unsafe_allow_html=True)
+
+    # --- ROW 3: Explainability ---
+    st.subheader("🧠 Explainability Analysis")
+    st.markdown("Why did the AI assign this score? Here are the top contributing factors:")
     
-    # 3. Technical Details Expander
-    with st.expander("🔍 View Technical Diagnostics"):
-        st.dataframe(input_df)
-        st.json({
-            "Used Cycle Count": cycle,
-            "Predicted RUL": f"{pred_rul:.2f} cycles",
-            "Predicted SoH": f"{pred_soh:.2f}%",
-            "Credit Score Raw": f"{credit_score:.4f}"
-        })
+    # Visualization: Horizontal Bar Chart of Impacts using Plotly
+    if explanations:
+        features = [x['feature'] for x in explanations[:8]] # Top 8
+        impacts = [x['impact'] for x in explanations[:8]]
+        colors = ['#2E7D32' if x > 0 else '#C62828' for x in impacts]
+        
+        fig = go.Figure(go.Bar(
+            x=impacts,
+            y=features,
+            orientation='h',
+            marker_color=colors,
+            text=[f"{x:.2f}" for x in impacts],
+            textposition='auto'
+        ))
+        fig.update_layout(
+            title="Feature Impact on Credit Score (SHAP Values)",
+            xaxis_title="Impact on Score (Points)",
+            yaxis_title="Feature",
+            yaxis={'categoryorder':'total ascending'},
+            height=400,
+            margin=dict(l=20, r=20, t=40, b=20)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Textual Breakdown
+        with st.expander("📝 See Detailed Impact Breakdown"):
+            for exp in explanations:
+                css_class = "impact-positive" if exp['impact'] > 0 else "impact-negative"
+                icon = "⬆️" if exp['impact'] > 0 else "⬇️"
+                st.markdown(f"- **{exp['feature']}** ({exp['value']:.2f}): <span class='{css_class}'>{icon} {exp['direction']}</span> score by {abs(exp['impact']):.2f}", unsafe_allow_html=True)
 
 else:
-    # Initial State / Instructions
-    st.info("👈 Please configure the input parameters in the sidebar and click 'Generate Report'.")
+    st.info("👈 Configure inputs to see the AI diagnosis.")
