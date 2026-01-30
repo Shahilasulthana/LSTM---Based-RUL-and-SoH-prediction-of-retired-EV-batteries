@@ -1,184 +1,120 @@
-# 🔋 Battery SoH & RUL Prediction Using LSTM
+# 🔋 AI-Powered Battery Health & Second-Life Predictor
 
-## 📌 Project Overview
+![Battery Health](https://img.shields.io/badge/Battery-Health_Monitor-green?style=for-the-badge&logo=battery)
+![Python](https://img.shields.io/badge/Python-3.10+-blue?style=for-the-badge&logo=python)
+![Streamlit](https://img.shields.io/badge/Frontend-Streamlit-red?style=for-the-badge&logo=streamlit)
+![TensorFlow](https://img.shields.io/badge/AI-TensorFlow_LSTM-orange?style=for-the-badge&logo=tensorflow)
 
-Lithium-ion batteries degrade over time due to repeated charge–discharge cycles, temperature variations, and load conditions. Accurate estimation of **State of Health (SoH)** and **Remaining Useful Life (RUL)** is essential for:
+## 📌 Overview
+This project is an advanced **Battery Management System (BMS)** analytics tool designed to assess the health of retired EV batteries. It goes beyond simple metrics by providing a **Battery Credit Score**, calculating **Remaining Useful Life (RUL)**, and offering actionable **Second-Life Usage Recommendations**.
 
-- Electric Vehicles (EVs)
-- Battery Energy Storage Systems (BESS)
-- Battery reuse and second-life decision-making
-- Preventive maintenance and safety monitoring
-
-This project implements a **data-driven deep learning (LSTM-based) system** to predict battery **SoH and RUL** using **time-series sensor data** from real-world battery experiments.
-
----
-
-## 🎯 Problem Statement
-
-Traditional battery health estimation relies on physics-based models that:
-
-- Require deep electrochemical expertise
-- Are difficult to generalize
-- Do not scale well to large battery fleets
-
-### Objective of this Project
-
-To design an **efficient, scalable, and data-driven system** that predicts:
-
-- Battery **State of Health (SoH)**
-- **Remaining Useful Life (RUL)** in months
-- Battery **health status**
-- **End-of-Life (EOL)** condition
-
-using only **sensor-level time-series data**.
+Using a hybrid AI approach (**Deep LSTM** for time-series forecasting + **LightGBM** for scoring), the system helps users decide whether a battery is suitable for *home backup*, *low-power storage*, or *recycling*.
 
 ---
 
-## 📊 Dataset Description
+## 🌟 Key Features
 
-The project uses the **NASA Lithium-Ion Battery Degradation Dataset**.
+### 1. 🧠 Hybrid AI Models
+- **LSTM Neural Network**: Predicts **State of Health (SoH)** and **Remaining Useful Life (RUL)** based on raw telemetry data (Voltage, Current, Temperature).
+- **LightGBM Regressor**: Calculates a comprehensive **Battery Credit Score (0-100)** to grade overall capability.
 
-### Dataset Characteristics
+### 2. 🚦 Smart Usage Recommendations
+Instead of generic labels, the system assigns a simplified **Capability Band** with specific advice:
+- **🟢 Very Healthy (80-100)**: Suitable for critical home backup & solar storage.
+- **🟡 Healthy (65-80)**: Good for controlled, moderate load applications.
+- **🔵 Degraded (45-65)**: Restricted to low-power, intermittent use.
+- **🔴 Critical (< 45)**: End-of-life; recommended for recycling.
 
-- **7,565 individual battery CSV files**
-- Each CSV file represents **one battery**
-- Each row represents a **time-step measurement**
-- Data includes different operating phases:
-  - Charging
-  - Discharging
-  - Rest
-  - Load and impedance measurements
+### 3. 🔍 Explainable AI (XAI)
+- Powered by **SHAP (SHapley Additive exPlanations)**.
+- Tells you *why* a battery got a specific score (e.g., *"High temperature history reduced the score by 12 points"*).
+- Provides transparency for decision-making.
 
-### Core Sensor Parameters Used
-
-- `Voltage_measured`
-- `Current_measured`
-- `Temperature_measured`
-- `Current_load`
-- `Voltage_load`
-- `Time`
-
-> 📌 **Important**  
-> SoH and RUL are **not provided** in the raw dataset and are **derived through feature engineering**.
+### 4. 📊 Interactive Dashboard
+- Built with **Streamlit** for real-time interaction.
+- Visualizes Score, RUL, and SoH.
+- Actionable "Tip Cards" for maximizing battery life.
 
 ---
 
-## 🧠 Key Concepts
-
-### 🔹 State of Health (SoH)
-
-SoH indicates how healthy a battery is compared to its initial condition.
-
-\[
-\text{SoH} = \frac{\text{Estimated Current Capacity}}{\text{Initial Capacity}}
-\]
-
-- **SoH = 1.0** → New battery  
-- **SoH ≤ 0.7** → End of Life (industry-standard threshold)
+## 🛠️ Tech Stack
+- **Languages**: Python
+- **ML/DL Frameworks**: TensorFlow (Keras), LightGBM, Scikit-Learn
+- **Explainability**: SHAP
+- **Visualization**: Plotly, Matplotlib, Seaborn
+- **Web App**: Streamlit
+- **Data Handling**: Pandas, NumPy
 
 ---
 
-### 🔹 Remaining Useful Life (RUL)
+## 📂 Project Structure
 
-RUL estimates how much usable life remains before a battery reaches end-of-life.
-
-- Computed in **cycles**
-- Converted to **months** assuming:
-  - 1 cycle ≈ 1 day
-  - 30 cycles ≈ 1 month
-
----
-
-## 🛠️ Methodology
-
-### 1️⃣ Data Loading
-
-- All individual battery CSV files are loaded separately
-- Each battery is processed independently to avoid data leakage
-
-### 2️⃣ Data Cleaning
-
-- Only **discharge-phase records** are retained
-- Rows with non-physical relevance for degradation are excluded
-- NaNs are handled via **phase-aware filtering**, not naive imputation
-
-### 3️⃣ Feature Engineering
-
-- Estimated capacity using **current–time integration**
-- Cycle indexing per battery
-- Computation of:
-  - SoH
-  - RUL (months)
-  - Health status (`Healthy`, `Degrading`, `Critical`)
-  - End-of-Life flag (`EOL_reached`)
-
-### 4️⃣ Sequence Creation
-
-- Sliding time windows are generated **per battery**
-- Enables temporal learning using LSTM
-- Preserves degradation continuity
+| File | Description |
+|------|-------------|
+| `usage_app.py` | 🚀 **Main Application**. Run this to launch the Smart Advisor. |
+| `battery_rul_soh_prediction.py` | Training script for the **LSTM (RUL/SoH)** model. |
+| `usage_tips.py` | Training script for the **Credit Score (LightGBM)** model & SHAP analysis. |
+| `package_usage_tips.py` | Helper script to bundle logic into `usage_tips.pkl`. |
+| `battery_lstm_model.keras` | Saved LSTM model artifact. |
+| `usage_tips.pkl` | Saved "All-in-One" Advisor artifact (Model + Rules + Explainer). |
+| `validate_dataset.py` | Utility to check dataset integrity. |
 
 ---
 
-## 🤖 Model Architecture
+## 🚀 Getting Started
 
-### 🔹 LSTM (Long Short-Term Memory)
-
-LSTM is used because:
-
-- Battery degradation is a **time-dependent process**
-- LSTM captures **long-term temporal dependencies**
-- It is widely adopted in **Prognostics and Health Management (PHM)**
-
-### Model Design
-
-- **Input:** Time-series sequences (e.g., 20 timesteps × features)
-- **Architecture:**
-  - LSTM (64 units)
-  - Dropout
-  - LSTM (32 units)
-  - Dense output layer
-- **Loss Function:** Mean Squared Error (MSE)
-- **Optimizer:** Adam
-- **Early stopping** to prevent overfitting
-
-Separate models are trained for:
-- **SoH prediction**
-- **RUL prediction**
-
----
-
-## 📁 Project Structure
-
-```text
-rul_soh_predictor/
-│
-├── archive/cleaned_dataset/
-│   ├── data/                 # Individual battery CSV files
-│   ├── extra_infos/          # Additional dataset information
-│   └── metadata.csv          # Optional battery metadata
-│
-├── battery_dataset_with_soh_rul.csv   # Engineered dataset
-│
-├── battery_lstm_model.keras           # Trained LSTM model
-├── scaler.pkl                         # Feature scaling object
-│
-├── battery_rul_soh_prediction.py      # Model training script
-├── predict_manual.py                  # Manual input prediction
-├── test_healthy_prediction.py         # Test predictions on healthy batteries
-├── validate_dataset.py                # Dataset validation & sanity checks
-│
-├── app.py                             # Application entry point (future deployment)
-├── .gitignore
-└── README.md
-
+### 1. Installation
+Clone the repository and install dependencies:
+```bash
+git clone https://github.com/Shahilasulthana/LSTM---Based-RUL-and-SoH-prediction-of-retired-EV-batteries.git
+cd rul_soh_predictor
+pip install -r requirements.txt
 ```
-<img width="1600" height="809" alt="image" src="https://github.com/user-attachments/assets/e9f9717e-12f0-4c8b-a65d-8876af5c42f4" />
+*(Note: Ensure you have `tensorflow`, `streamlit`, `shap`, `lightgbm`, `joblib`, `plotly` installed)*
+
+### 2. Run the Web Application
+Launch the Smart Advisor dashboard:
+```bash
+streamlit run usage_app.py
+```
+
+### 3. (Optional) Retrain Models
+If you want to retrain the models on new data:
+```bash
+# 1. Train LSTM Model
+python battery_rul_soh_prediction.py
+
+# 2. Train Credit Score Model & Explainability
+python usage_tips.py
+
+# 3. Package the Advisor
+python package_usage_tips.py
+```
 
 ---
 
-<img width="1600" height="810" alt="image" src="https://github.com/user-attachments/assets/534fa632-5f6a-4b88-8df1-2661e1360015" />
+## 📊 How It Works (The "Credit Score" Logic)
+
+The system evaluates the battery based on telemetry features:
+- **Voltage Stability**: `V_avg`, `V_min`, `V_max`
+- **Thermal Stress**: `T_avg`, `T_max`
+- **Usage History**: `Cycle Count`
+
+It then outputs a **Credit Score** that maps to a guidance band:
+
+| Score | Band | Icon | Recommendation |
+|-------|------|------|----------------|
+| **80-100** | Very Healthy | 🟢 | **Stable.** Safe for high-demand loads. |
+| **65-80** | Healthy | 🟡 | **Good.** Limit full depth of discharge. |
+| **45-65** | Degraded | 🔵 | **Fair.** Low power usage only. |
+| **< 45** | Critical | 🔴 | **Risk.** Recycle immediately. |
 
 ---
 
-<img width="1600" height="802" alt="image" src="https://github.com/user-attachments/assets/4a85a78c-1455-41a3-a4af-40148859baa9" />
+## 🔮 Future Improvements
+- [ ] Integration with real-time BMS hardware.
+- [ ] Cloud deployment for remote battery monitoring.
+- [ ] Advanced anomaly detection for safety alerts.
+
+---
+*Created by Shahila Sulthana*
