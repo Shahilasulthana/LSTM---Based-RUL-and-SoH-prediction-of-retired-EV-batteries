@@ -59,10 +59,23 @@ def predict_healthy_test():
     print(f"Predicted SoH: {pred_soh:.4f} ({pred_soh*100:.2f}%)")
     print(f"Predicted RUL: {pred_rul:.1f} cycles (~{rul_months:.1f} months)")
     
-    if pred_soh < 0.80:
-        print("Status: Unhealthy / Replace Battery")
+    # 6. Apply Capability Band Logic
+    if pred_soh >= 0.70:
+        band = 'Band A'
+        recs = 'Home backup, Small solar storage, Off-grid residential loads'
+    elif pred_soh >= 0.55:
+        band = 'Band B'
+        recs = 'Backup power systems, Telecom auxiliary storage, Emergency or contingency power'
+    elif pred_soh >= 0.40:
+        band = 'Band C'
+        recs = 'Low-power DC systems, Small electronics backup, Educational or experimental setups'
     else:
-        print("Status: Healthy")
+        band = 'Band D'
+        recs = 'Not suitable for second-life deployment, Requires controlled recycling'
+
+    print(f"Capability Band: {band}")
+    print(f"Recommended Applications: {recs}")
+    
     print("-----------------------------------------------------")
 
 if __name__ == "__main__":

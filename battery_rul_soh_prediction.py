@@ -108,19 +108,21 @@ dataset_df.dropna(inplace=True)
 dataset_df = dataset_df[dataset_df['Capacity'] > 0] # Filter out 0 capacity
 print(f"Records after dropping NaNs and 0 Capacity: {len(dataset_df)}")
 
-# 3. Calculate SoH and RUL
-# Compute SoH and RUL per Battery ID
+# 3. Calculate SoH, RUL, and Assign Bands
+# Compute SoH, RUL per Battery ID
 dataset_df = dataset_df.sort_values(by=['battery_id', 'cycle'])
 
-def calculate_soh_rul(group):
+def calculate_health_indicators(group):
     # 1. Nominal Capacity (Max capacity in the first few cycles or absolute max)
     # We iterate to find the max capacity observed to be robust
     nominal_capacity = group['Capacity'].max()
     
-
     if nominal_capacity == 0 or np.isnan(nominal_capacity):
         group['SoH'] = np.nan
         group['RUL'] = np.nan
+        group['Degradation_Rate'] = np.nan
+        group['Thermal_Stress'] = np.nan
+        group['Capability_Band'] = 'Unknown'
         return group
     
     # Calculate SoH
@@ -131,14 +133,67 @@ def calculate_soh_rul(group):
     total_cycles = group['cycle'].max()
     group['RUL'] = total_cycles - group['cycle']
     
+    # Calculate Degradation Rate (Slope of Capacity vs Cycle)
+    # We use numpy's gradient to estimate the slope at each point
+    # Negative slope implies degradation
+    if len(group) > 1:
+        group['Degradation_Rate'] = np.gradient(group['Capacity'], group['cycle'])
+    else:
+        group['Degradation_Rate'] = 0.0
+
+    # Calculate Thermal Stress (Using Max Temperature)
+    group['Thermal_Stress'] = group['T_max']
+
+    # Assign Capability Bands and Recommendations
+    # Band A: SoH >= 70%
+    # Band B: 55% <= SoH < 70%
+    # Band C: 40% <= SoH < 55%
+    # Band D: SoH < 40%
+    
+    def get_band_and_recommendation(soh):
+        if pd.isna(soh):
+            return 'Unknown', 'Unknown'
+            
+        if soh >= 0.70:
+            band = 'Band A'
+            recs = 'Home backup, Small solar storage, Off-grid residential loads'
+            
+        elif soh >= 0.55:
+            band = 'Band B'
+            recs = 'Backup power systems, Telecom auxiliary storage, Emergency or contingency power'
+            
+        elif soh >= 0.40:
+            band = 'Band C'
+            recs = 'Low-power DC systems, Small electronics backup, Educational or experimental setups'
+            
+        else:
+            band = 'Band D'
+            recs = 'Not suitable for second-life deployment, Requires controlled recycling'
+            
+        return band, recs
+
+    # Apply the logic
+    results = group['SoH'].apply(get_band_and_recommendation)
+    
+    group['Capability_Band'] = [res[0] for res in results]
+    group['Recommended_Applications'] = [res[1] for res in results]
+
     return group
 
-dataset_df = dataset_df.groupby('battery_id').apply(calculate_soh_rul).reset_index(drop=True)
+dataset_df = dataset_df.groupby('battery_id').apply(calculate_health_indicators).reset_index(drop=True)
 dataset_df.dropna(subset=['SoH', 'RUL'], inplace=True)
 
 # Save the new comprehensive dataset
-dataset_df.to_csv("battery_dataset_with_soh_rul.csv", index=False)
-print("New dataset generated and saved: battery_dataset_with_soh_rul.csv")
+dataset_df.to_csv("battery_dataset_with_soh_rul_bands.csv", index=False)
+print("New dataset generated and saved: battery_dataset_with_soh_rul_bands.csv")
+
+print("\n--- Capability Band & Suitability Analysis Sample ---")
+sample_batteries = dataset_df.drop_duplicates(subset=['battery_id']).head(5)
+
+for _, row in sample_batteries.iterrows():
+    print(f"\nBattery ID: {row['battery_id']} (SoH: {row['SoH']*100:.1f}%)")
+    print(f"  -> Band: {row['Capability_Band']}")
+    print(f"  -> Recommended Applications: {row['Recommended_Applications']}")
 
 # 4. Prepare Data for Deep LSTM Model
 # Use sliding window sequences for better temporal accuracy
